@@ -1,7 +1,8 @@
 import java.io.File
 
 import Common._
-import com.dancingrobot84.sbtidea.tasks.{UpdateIdea => updateIdeaTask}
+import org.jetbrains.sbtidea.tasks.{UpdateIdea => updateIdeaTask}
+import org.jetbrains.sbtidea.Keys._
 import sbt.Keys.{`package` => pack}
 import sbtide.Keys.ideSkipProject
 
@@ -81,6 +82,16 @@ lazy val scalaImpl: sbt.Project =
       ideaInternalPluginsJars :=
         ideaInternalPluginsJars.value.filterNot(cp => cp.data.getName.contains("junit-jupiter-api"))
       ,
+      packageMethod := PackagingMethod.MergeIntoOther(scalaCommunity),
+      libraryMappings ++= Seq(
+        "org.scalameta" %% ".*" % ".*"                        -> Some("scalameta.jar"),
+        "com.trueaccord.scalapb" %% "scalapb-runtime" % ".*"  -> None,
+        "com.trueaccord.lenses" %% "lenses" % ".*"            -> None,
+        "com.lihaoyi" %% "sourcecode" % ".*"                  -> None,
+        "com.lihaoyi" %% "fastparse-utils" % ".*"             -> None,
+        "com.typesafe" % "config" % ".*"                      -> None,
+        "commons-lang" % "commons-lang" % ".*"                -> None
+      ),
       Keys.aggregate.in(updateIdea) := false,
       buildInfoPackage := "org.jetbrains.plugins.scala.buildinfo",
       buildInfoKeys := Seq(
@@ -98,19 +109,24 @@ lazy val compilerJps =
     .dependsOn(compilerShared)
     .enablePlugins(SbtIdeaPlugin)
     .settings(
-      libraryDependencies ++=
-        Seq(Dependencies.nailgun) ++
-          DependencyGroups.sbtBundled
-    )
+      packageMethod       :=  PackagingMethod.Standalone("jps/compiler-jps.jar"),
+      libraryDependencies ++= Seq(Dependencies.nailgun) ++ DependencyGroups.sbtBundled,
+      libraryMappings     ++= Dependencies.nailgun       -> Some("lib/jps/nailgun.jar") ::
+                              Dependencies.zincInterface -> Some("lib/jps/compiler-interface.jar") :: Nil)
 
 lazy val compilerShared =
   newProject("compiler-shared", file("scala/compiler-shared"))
     .enablePlugins(SbtIdeaPlugin)
-    .settings(libraryDependencies += Dependencies.nailgun)
+    .settings(
+      libraryDependencies += Dependencies.nailgun,
+      libraryMappings += Dependencies.nailgun -> Some("lib/jps/nailgun.jar"),
+      packageMethod := PackagingMethod.MergeIntoOther(scalaCommunity)
+    )
 
 lazy val runners =
   newProject("runners", file("scala/runners"))
     .settings(
+      packageMethod := PackagingMethod.Standalone(),
       libraryDependencies ++= DependencyGroups.runners,
       // WORKAROUND fixes build error in sbt 0.13.12+ analogously to https://github.com/scala/scala/pull/5386/
       ivyScala ~= (_ map (_ copy (overrideScalaVersion = false)))
@@ -119,18 +135,26 @@ lazy val runners =
 lazy val nailgunRunners =
   newProject("nailgun", file("scala/nailgun"))
     .dependsOn(runners)
-    .settings(libraryDependencies += Dependencies.nailgun)
+    .settings(
+      libraryDependencies += Dependencies.nailgun,
+      libraryMappings += Dependencies.nailgun -> Some("lib/jps/nailgun.jar"),
+      packageMethod := PackagingMethod.Standalone("lib/scala-nailgun-runners.jar")
+    )
 
 lazy val decompiler =
   newProject("decompiler", file("scala/decompiler"))
     .settings(commonTestSettings(packagedPluginDir): _*)
-    .settings(libraryDependencies ++= DependencyGroups.decompiler)
+    .settings(
+      libraryDependencies ++= DependencyGroups.decompiler,
+      packageMethod := PackagingMethod.Standalone("lib/scalap.jar")
+    )
 
 lazy val macroAnnotations =
   newProject("macros", file("scala/macros"))
     .settings(Seq(
       addCompilerPlugin(Dependencies.macroParadise),
-      libraryDependencies ++= Seq(Dependencies.scalaReflect, Dependencies.scalaCompiler)
+      libraryDependencies ++= Seq(Dependencies.scalaReflect, Dependencies.scalaCompiler),
+      packageMethod := PackagingMethod.Skip()
     ): _*)
 
 // Integration with other IDEA plugins
@@ -211,35 +235,35 @@ lazy val propertiesIntegration =
 
 // Utility projects
 
-lazy val ideaRunner =
-  newProject("idea-runner", file("target/tools/idea-runner"))
-    .dependsOn(Seq(compilerShared, runners, scalaCommunity, compilerJps, nailgunRunners, decompiler).map(_ % Provided): _*)
-    .settings(
-      autoScalaLibrary := false,
-      unmanagedJars in Compile := ideaMainJars.in(scalaImpl).value,
-      unmanagedJars in Compile += file(System.getProperty("java.home")).getParentFile / "lib" / "tools.jar",
-      // run configuration
-      fork in run := true,
-      mainClass in(Compile, run) := Some("com.intellij.idea.Main"),
-      javaOptions in run ++= Seq(
-        "-Xmx800m",
-        "-XX:ReservedCodeCacheSize=64m",
-        "-XX:MaxPermSize=250m",
-        "-XX:+HeapDumpOnOutOfMemoryError",
-        "-ea",
-        "-Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005",
-        "-Didea.is.internal=true",
-        "-Didea.debug.mode=true",
-        s"-Didea.system.path=${homePrefix.getCanonicalPath}/.ScalaPluginIC/system",
-        s"-Didea.config.path=${homePrefix.getCanonicalPath}/.ScalaPluginIC/config",
-        "-Dapple.laf.useScreenMenuBar=true",
-        s"-Dplugin.path=${packagedPluginDir.value}",
-        "-Didea.ProcessCanceledException=disabled"
-      ),
-      products in Compile := {
-        (products in Compile).value :+ (pack in pluginPackagerCommunity).value
-      }
-    )
+//lazy val ideaRunner =
+//  newProject("idea-runner", file("target/tools/idea-runner"))
+//    .dependsOn(Seq(compilerShared, runners, scalaCommunity, compilerJps, nailgunRunners, decompiler).map(_ % Provided): _*)
+//    .settings(
+//      autoScalaLibrary := false,
+//      unmanagedJars in Compile := ideaMainJars.in(scalaImpl).value,
+//      unmanagedJars in Compile += file(System.getProperty("java.home")).getParentFile / "lib" / "tools.jar",
+//      // run configuration
+//      fork in run := true,
+//      mainClass in(Compile, run) := Some("com.intellij.idea.Main"),
+//      javaOptions in run ++= Seq(
+//        "-Xmx800m",
+//        "-XX:ReservedCodeCacheSize=64m",
+//        "-XX:MaxPermSize=250m",
+//        "-XX:+HeapDumpOnOutOfMemoryError",
+//        "-ea",
+//        "-Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005",
+//        "-Didea.is.internal=true",
+//        "-Didea.debug.mode=true",
+//        s"-Didea.system.path=${homePrefix.getCanonicalPath}/.ScalaPluginIC/system",
+//        s"-Didea.config.path=${homePrefix.getCanonicalPath}/.ScalaPluginIC/config",
+//        "-Dapple.laf.useScreenMenuBar=true",
+//        s"-Dplugin.path=${packagedPluginDir.value}",
+//        "-Didea.ProcessCanceledException=disabled"
+//      ),
+//      products in Compile := {
+//        (products in Compile).value :+ (pack in pluginPackagerCommunity).value
+//      }
+//    )
 
 lazy val sbtRuntimeDependencies =
   (project in file("target/tools/sbt-runtime-dependencies"))
@@ -249,7 +273,21 @@ lazy val sbtRuntimeDependencies =
       conflictManager := ConflictManager.all,
       conflictWarning := ConflictWarning.disable,
       resolvers += sbt.Classpaths.sbtPluginReleases,
-      ideSkipProject := true
+      ideSkipProject := true,
+      packageMethod := PackagingMethod.Skip(),
+      libraryMappings ++= Seq(
+        Dependencies.sbtLaunch      -> Some("launcher/sbt-launch.jar"),
+        Dependencies.sbtInterface   -> Some("lib/jps/sbt-interface.jar"),
+        Dependencies.zincInterface  -> Some("lib/jps/compiler-interface.jar"),
+        Dependencies.compilerBridgeSources_2_13 -> Some("lib/jps/compiler-interface-sources-2.13.jar"),
+        Dependencies.compilerBridgeSources_2_11 -> Some("lib/jps/compiler-interface-sources-2.11.jar"),
+        Dependencies.compilerBridgeSources_2_10 -> Some("lib/jps/compiler-interface-sources-2.10.jar"),
+        Dependencies.sbtStructureExtractor_100  -> Some("launcher/sbt-structure-1.0.jar"),
+        Dependencies.sbtStructureExtractor_013  -> Some("launcher/sbt-structure-0.13.jar"),
+        Dependencies.sbtStructureExtractor_012  -> Some("launcher/sbt-structure-0.12.jar"),
+        "org.scala-sbt" % "util-interface" % "1.1.2" -> None,
+        "org.scala-sbt" % "launcher" % "1.0.3" -> None
+      )
     )
 
 //lazy val jmhBenchmarks =
@@ -317,6 +355,14 @@ lazy val scalaPluginJarPackager =
           products.in(mavenIntegration, Compile).value ++
           products.in(propertiesIntegration, Compile).value,
       ideSkipProject := true
+    )
+
+lazy val scalaPluginCommunity =
+  newProject("scalaPluginCommunity", file("target/tools/scalaPluginCommunity"))
+  .dependsOn(scalaCommunity, compilerJps, repackagedZinc, decompiler, compilerShared, nailgunRunners, runners) //, sbtRuntimeDependencies % "test->test")
+    .settings(
+      packageMethod := PackagingMethod.Standalone(),
+      libraryMappings += Dependencies.scalaLibrary -> Some("lib/scala-library.jar")
     )
 
 lazy val pluginPackagerCommunity =
@@ -432,6 +478,9 @@ lazy val repackagedZinc =
   newProject("repackagedZinc", file("target/tools/zinc"))
     .settings(
       assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false),
+      pluginOutputDir := baseDirectory.value / "plugin",
+      assembleLibraries := true,
+      packageMethod := PackagingMethod.Standalone("lib/jps/incremental-compiler.jar"),
       libraryDependencies += Dependencies.zinc,
       ideSkipProject := true
     )

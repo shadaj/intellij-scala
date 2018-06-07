@@ -117,7 +117,7 @@ object Packaging {
       zipFile
     }
 
-  def copyZipContent(input: File, outStream: ZipOutputStream): Unit = {
+  private def mergeZipFiles(input: File, outStream: ZipOutputStream): Unit = {
     val inStream = new ZipInputStream(new BufferedInputStream(new FileInputStream(input)))
     try {
       val buffer = new Array[Byte](64 * 1024)
@@ -140,11 +140,11 @@ object Packaging {
     } finally { inStream.close() }
   }
 
-  def fastMerge(input: Seq[File], output: File): Unit = {
+  private def fastMerge(input: Seq[File], output: File): Unit = {
     val outStream = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(output)))
     try {
       for (file <- input) {
-        copyZipContent(file, outStream)
+        mergeZipFiles(file, outStream)
       }
     } finally { outStream.close() }
   }
