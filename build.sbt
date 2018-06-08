@@ -22,6 +22,10 @@ testConfigDir in ThisBuild := homePrefix / ".ScalaPluginIC" / "test-config"
 
 testSystemDir in ThisBuild := homePrefix / ".ScalaPluginIC" / "test-system"
 
+lazy val iLoopWrapperPath = settingKey[File]("Path to repl interface sources")
+
+iLoopWrapperPath := baseDirectory.in(compilerJps).value / "resources" / "ILoopWrapperImpl.scala"
+
 onLoad in Global := ((s: State) => {
   "updateIdea" :: s
 }) compose (onLoad in Global).value
@@ -52,9 +56,11 @@ lazy val scalaCommunity: sbt.Project =
       mavenIntegration,
       propertiesIntegration)
     .settings(
-      aggregate.in(updateIdea) := false,
-      ideExcludedDirectories := Seq(baseDirectory.value / "target")
-    )
+      aggregate.in(updateIdea)  := false,
+      ideExcludedDirectories    := Seq(baseDirectory.value / "target"),
+      packageAdditionalProjects := Seq(compilerJps, repackagedZinc, decompiler, compilerShared, nailgunRunners, runners, sbtRuntimeDependencies),
+      packageLibraryMappings    := Dependencies.scalaLibrary -> Some("lib/scala-library.jar") ::
+                                    Nil )
 
 lazy val scalaImpl: sbt.Project =
   newProject("scala-impl", file("scala/scala-impl"))
@@ -83,15 +89,20 @@ lazy val scalaImpl: sbt.Project =
         ideaInternalPluginsJars.value.filterNot(cp => cp.data.getName.contains("junit-jupiter-api"))
       ,
       packageMethod := PackagingMethod.MergeIntoOther(scalaCommunity),
-      libraryMappings ++= Seq(
-        "org.scalameta" %% ".*" % ".*"                        -> Some("scalameta.jar"),
+      packageLibraryMappings ++= Seq(
+        "org.scalameta" %% ".*" % ".*"                        -> Some("lib/scalameta.jar"),
         "com.trueaccord.scalapb" %% "scalapb-runtime" % ".*"  -> None,
         "com.trueaccord.lenses" %% "lenses" % ".*"            -> None,
         "com.lihaoyi" %% "sourcecode" % ".*"                  -> None,
         "com.lihaoyi" %% "fastparse-utils" % ".*"             -> None,
         "com.typesafe" % "config" % ".*"                      -> None,
-        "commons-lang" % "commons-lang" % ".*"                -> None
+        "commons-lang" % "commons-lang" % ".*"                -> None,
+        Dependencies.scalaXml                                 -> Some("lib/scala-xml.jar"),
+        Dependencies.scalaReflect                             -> Some("lib/scala-reflect.jar"),
+        Dependencies.scalaParserCombinators                   -> Some("lib/scala-parser-combinators.jar")
       ),
+      packageFileMappings += baseDirectory.in(compilerJps).value / "resources" / "ILoopWrapperImpl.scala" ->
+                            "lib/jps/repl-interface-sources.jar",
       Keys.aggregate.in(updateIdea) := false,
       buildInfoPackage := "org.jetbrains.plugins.scala.buildinfo",
       buildInfoKeys := Seq(
@@ -109,18 +120,18 @@ lazy val compilerJps =
     .dependsOn(compilerShared)
     .enablePlugins(SbtIdeaPlugin)
     .settings(
-      packageMethod       :=  PackagingMethod.Standalone("jps/compiler-jps.jar"),
+      packageMethod       :=  PackagingMethod.Standalone("lib/jps/compiler-jps.jar"),
       libraryDependencies ++= Seq(Dependencies.nailgun) ++ DependencyGroups.sbtBundled,
-      libraryMappings     ++= Dependencies.nailgun       -> Some("lib/jps/nailgun.jar") ::
-                              Dependencies.zincInterface -> Some("lib/jps/compiler-interface.jar") :: Nil)
+      packageLibraryMappings ++= Dependencies.nailgun       -> Some("lib/jps/nailgun.jar") ::
+                                 Dependencies.zincInterface -> Some("lib/jps/compiler-interface.jar") :: Nil)
 
 lazy val compilerShared =
   newProject("compiler-shared", file("scala/compiler-shared"))
     .enablePlugins(SbtIdeaPlugin)
     .settings(
       libraryDependencies += Dependencies.nailgun,
-      libraryMappings += Dependencies.nailgun -> Some("lib/jps/nailgun.jar"),
-      packageMethod := PackagingMethod.MergeIntoOther(scalaCommunity)
+      packageLibraryMappings += Dependencies.nailgun -> Some("lib/jps/nailgun.jar"),
+      packageMethod := PackagingMethod.Standalone("lib/compiler-shared.jar")
     )
 
 lazy val runners =
@@ -137,7 +148,7 @@ lazy val nailgunRunners =
     .dependsOn(runners)
     .settings(
       libraryDependencies += Dependencies.nailgun,
-      libraryMappings += Dependencies.nailgun -> Some("lib/jps/nailgun.jar"),
+      packageLibraryMappings += Dependencies.nailgun -> Some("lib/jps/nailgun.jar"),
       packageMethod := PackagingMethod.Standalone("lib/scala-nailgun-runners.jar")
     )
 
@@ -181,9 +192,7 @@ lazy val copyrightIntegration =
     .settings(fullClasspath in Test := deduplicatedClasspath((fullClasspath in Test).value, communityFullClasspath.value))
     .settings(commonTestSettings(packagedPluginDir): _*)
     .settings(
-      ideaInternalPlugins := Seq(
-        "copyright"
-      )
+      ideaInternalPlugins := Seq("copyright")
     )
 
 lazy val gradleIntegration =
@@ -206,9 +215,7 @@ lazy val intellilangIntegration =
     .settings(fullClasspath in Test := deduplicatedClasspath((fullClasspath in Test).value, communityFullClasspath.value))
     .settings(commonTestSettings(packagedPluginDir): _*)
     .settings(
-      ideaInternalPlugins := Seq(
-        "IntelliLang"
-      )
+      ideaInternalPlugins := Seq("IntelliLang")
     )
 
 lazy val mavenIntegration =
@@ -228,9 +235,7 @@ lazy val propertiesIntegration =
     .settings(fullClasspath in Test := deduplicatedClasspath((fullClasspath in Test).value, communityFullClasspath.value))
     .settings(commonTestSettings(packagedPluginDir): _*)
     .settings(
-      ideaInternalPlugins := Seq(
-        "properties"
-      )
+      ideaInternalPlugins := Seq("properties")
     )
 
 // Utility projects
@@ -275,10 +280,10 @@ lazy val sbtRuntimeDependencies =
       resolvers += sbt.Classpaths.sbtPluginReleases,
       ideSkipProject := true,
       packageMethod := PackagingMethod.Skip(),
-      libraryMappings ++= Seq(
-        Dependencies.sbtLaunch      -> Some("launcher/sbt-launch.jar"),
-        Dependencies.sbtInterface   -> Some("lib/jps/sbt-interface.jar"),
-        Dependencies.zincInterface  -> Some("lib/jps/compiler-interface.jar"),
+      packageLibraryMappings ++= Seq(
+        Dependencies.sbtLaunch                  -> Some("launcher/sbt-launch.jar"),
+        Dependencies.sbtInterface               -> Some("lib/jps/sbt-interface.jar"),
+        Dependencies.zincInterface              -> Some("lib/jps/compiler-interface.jar"),
         Dependencies.compilerBridgeSources_2_13 -> Some("lib/jps/compiler-interface-sources-2.13.jar"),
         Dependencies.compilerBridgeSources_2_11 -> Some("lib/jps/compiler-interface-sources-2.11.jar"),
         Dependencies.compilerBridgeSources_2_10 -> Some("lib/jps/compiler-interface-sources-2.10.jar"),
@@ -286,8 +291,17 @@ lazy val sbtRuntimeDependencies =
         Dependencies.sbtStructureExtractor_013  -> Some("launcher/sbt-structure-0.13.jar"),
         Dependencies.sbtStructureExtractor_012  -> Some("launcher/sbt-structure-0.12.jar"),
         "org.scala-sbt" % "util-interface" % "1.1.2" -> None,
-        "org.scala-sbt" % "launcher" % "1.0.3" -> None
-      )
+        "org.scala-sbt" % "launcher" % "1.0.3"       -> None
+      ),
+      packageFileMappings += {
+        import Dependencies._
+        import Versions._
+        val repoDir = target.value / "repo"
+        LocalRepoPackager.localPluginRepo(
+          repoDir,
+          (sbtStructureExtractor.name, sbtStructureVersion) :: ("sbt-idea-shell", sbtIdeaShellVersion) :: Nil)
+        repoDir -> "repo/"
+      }
     )
 
 //lazy val jmhBenchmarks =
@@ -338,10 +352,6 @@ lazy val packagedPluginDir = settingKey[File]("Path to packaged, but not yet com
 
 packagedPluginDir in ThisBuild := baseDirectory.in(ThisBuild).value / "target" / "plugin" / "Scala"
 
-lazy val iLoopWrapperPath = settingKey[File]("Path to repl interface sources")
-
-iLoopWrapperPath := baseDirectory.in(compilerJps).value / "resources" / "ILoopWrapperImpl.scala"
-
 //packages output of several modules to a single jar
 lazy val scalaPluginJarPackager =
   newProject("scalaPluginJarPackager", file("target/tools/scalaPluginJarPackager"))
@@ -357,13 +367,13 @@ lazy val scalaPluginJarPackager =
       ideSkipProject := true
     )
 
-lazy val scalaPluginCommunity =
-  newProject("scalaPluginCommunity", file("target/tools/scalaPluginCommunity"))
-  .dependsOn(scalaCommunity, compilerJps, repackagedZinc, decompiler, compilerShared, nailgunRunners, runners) //, sbtRuntimeDependencies % "test->test")
-    .settings(
-      packageMethod := PackagingMethod.Standalone(),
-      libraryMappings += Dependencies.scalaLibrary -> Some("lib/scala-library.jar")
-    )
+//lazy val scalaPluginCommunity =
+//  newProject("scalaPluginCommunity", file("target/tools/scalaPluginCommunity"))
+//  .dependsOn(scalaCommunity, compilerJps, repackagedZinc, decompiler, compilerShared, nailgunRunners, runners) //, sbtRuntimeDependencies % "test->test")
+//    .settings(
+//      packageMethod := PackagingMethod.Standalone(),
+//      packageLibraryMappings += Dependencies.scalaLibrary -> Some("lib/scala-library.jar")
+//    )
 
 lazy val pluginPackagerCommunity =
   newProject("pluginPackagerCommunity", file("target/tools/packager"))
@@ -394,8 +404,8 @@ lazy val pluginPackagerCommunity =
             "lib/jps/compiler-interface-sources-2.11.jar"),
           Library(Dependencies.compilerBridgeSources_2_13,
             "lib/jps/compiler-interface-sources-2.13.jar"),
-          Artifact((assembly in repackagedZinc).value,
-            "lib/jps/incremental-compiler.jar"),
+//          Artifact((assembly in repackagedZinc).value,
+//            "lib/jps/incremental-compiler.jar"),
           Library(Dependencies.zincInterface,
             "lib/jps/compiler-interface.jar"),
           Library(sbtInterface,
@@ -440,14 +450,12 @@ lazy val pluginPackagerCommunity =
           }
 
         val repo = {
-          val localRepo = target.value / "repo"
           LocalRepoPackager.localPluginRepo(
-            localRepo,
-            Seq(
-              (Dependencies.sbtStructureExtractor.name, Versions.sbtStructureVersion),
+            target.value / "repo",
+            Seq((Dependencies.sbtStructureExtractor.name, Versions.sbtStructureVersion),
               ("sbt-idea-shell", Versions.sbtIdeaShellVersion)))
 
-          Seq(Directory(localRepo,"repo/"))
+          Seq(Directory(target.value / "repo","repo/"))
         }
 
         Packaging.convertEntriesToMappings(
@@ -477,9 +485,9 @@ lazy val pluginCompressorCommunity =
 lazy val repackagedZinc =
   newProject("repackagedZinc", file("target/tools/zinc"))
     .settings(
-      assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false),
-      pluginOutputDir := baseDirectory.value / "plugin",
-      assembleLibraries := true,
+//      assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false),
+      packageOutputDir := baseDirectory.value / "plugin",
+      packageAssembleLibraries := true,
       packageMethod := PackagingMethod.Standalone("lib/jps/incremental-compiler.jar"),
       libraryDependencies += Dependencies.zinc,
       ideSkipProject := true
