@@ -68,4 +68,21 @@ object Common {
     ),
     envVars in Test += "NO_FS_ROOTS_ACCESS_CHECK" -> "yes"
   )
+
+  def pluginVersion: String =
+    Option(System.getProperty("plugin.version")).getOrElse("SNAPSHOT")
+
+  def replaceInFile(f: File, source: String, target: String): Unit = {
+    if (!(source == null) && !(target == null)) {
+      IO.writeLines(f, IO.readLines(f) map { _.replace(source, target) })
+    }
+  }
+
+  def patchedPluginXML(mapping: (File, String)): (File, String) = {
+    val (f, path) = mapping
+    val tmpFile = java.io.File.createTempFile("plugin", ".xml")
+    IO.copyFile(f, tmpFile)
+    replaceInFile(tmpFile, "VERSION", pluginVersion)
+    (tmpFile, path)
+  }
 }
