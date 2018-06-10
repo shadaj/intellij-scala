@@ -1,28 +1,19 @@
 import java.io.File
 
 import Common._
-import org.jetbrains.sbtidea.tasks.{UpdateIdea => updateIdeaTask}
-import org.jetbrains.sbtidea.Keys._
-import sbt.Keys.{`package` => pack}
 import sbtide.Keys.ideSkipProject
 
 // Global build settings
+
+ideaPluginName in ThisBuild := "Scala"
+
+ideaBuild in ThisBuild := Versions.ideaVersion
 
 resolvers in ThisBuild ++=
   BintrayJetbrains.allResolvers :+
     Resolver.typesafeIvyRepo("releases")
 
 resolvers in ThisBuild += Resolver.sonatypeRepo("snapshots")
-
-ideaBuild in ThisBuild := Versions.ideaVersion
-
-ideaDownloadDirectory in ThisBuild := homePrefix / ".ScalaPluginIC" / "sdk"
-
-testConfigDir in ThisBuild := homePrefix / ".ScalaPluginIC" / "test-config"
-
-testSystemDir in ThisBuild := homePrefix / ".ScalaPluginIC" / "test-system"
-
-packageOutputDir in ThisBuild := (baseDirectory in ThisBuild).value / "artifact" / "Scala"
 
 // Main projects
 lazy val scalaCommunity: sbt.Project =
@@ -44,7 +35,6 @@ lazy val scalaCommunity: sbt.Project =
       mavenIntegration,
       propertiesIntegration)
     .settings(
-      aggregate.in(updateIdea)  := false,
       ideExcludedDirectories    := Seq(baseDirectory.value / "target"),
       packageAdditionalProjects := Seq(compilerJps, repackagedZinc, decompiler, compilerShared, nailgunRunners, runners, sbtRuntimeDependencies),
       packageLibraryMappings    := Dependencies.scalaLibrary -> Some("lib/scala-library.jar") :: Nil )
@@ -52,15 +42,13 @@ lazy val scalaCommunity: sbt.Project =
 lazy val scalaImpl: sbt.Project =
   newProject("scala-impl", file("scala/scala-impl"))
     .dependsOn(compilerShared, decompiler % "test->test;compile->compile", runners % "test->test;compile->compile", macroAnnotations)
-    .enablePlugins(SbtIdeaPlugin, BuildInfoPlugin)
-    .settings(commonTestSettings(packageOutputDir): _*)
+    .enablePlugins(BuildInfoPlugin)
     .settings(
       ideExcludedDirectories := Seq(baseDirectory.value / "testdata" / "projects"),
       javacOptions in Global ++= Seq("-source", "1.8", "-target", "1.8"),
       scalacOptions in Global ++= Seq("-target:jvm-1.8", "-deprecation"),
       //scalacOptions in Global += "-Xmacro-settings:analyze-caches",
       libraryDependencies ++= DependencyGroups.scalaCommunity,
-      unmanagedJars in Compile += file(System.getProperty("java.home")).getParentFile / "lib" / "tools.jar",
       addCompilerPlugin(Dependencies.macroParadise),
       ideaInternalPlugins := Seq(
         "java-i18n",
@@ -89,7 +77,6 @@ lazy val scalaImpl: sbt.Project =
       ),
       packageFileMappings += baseDirectory.in(compilerJps).value / "resources" / "ILoopWrapperImpl.scala" ->
                             "lib/jps/repl-interface-sources.jar",
-      Keys.aggregate.in(updateIdea) := false,
       buildInfoPackage := "org.jetbrains.plugins.scala.buildinfo",
       buildInfoKeys := Seq(
         name, version, scalaVersion, sbtVersion,
@@ -97,14 +84,12 @@ lazy val scalaImpl: sbt.Project =
         BuildInfoKey.constant("sbtStructureVersion", Versions.sbtStructureVersion),
         BuildInfoKey.constant("sbtIdeaShellVersion", Versions.sbtIdeaShellVersion),
         BuildInfoKey.constant("sbtLatest_0_13", Versions.Sbt.latest_0_13)
-      ),
-      fullClasspath in Test := deduplicatedClasspath((fullClasspath in Test).value, communityFullClasspath.value)
+      )
     )
 
 lazy val compilerJps =
   newProject("compiler-jps", file("scala/compiler-jps"))
     .dependsOn(compilerShared)
-    .enablePlugins(SbtIdeaPlugin)
     .settings(
       packageMethod       :=  PackagingMethod.Standalone("lib/jps/compiler-jps.jar"),
       libraryDependencies ++= Seq(Dependencies.nailgun) ++ DependencyGroups.sbtBundled,
@@ -113,7 +98,6 @@ lazy val compilerJps =
 
 lazy val compilerShared =
   newProject("compiler-shared", file("scala/compiler-shared"))
-    .enablePlugins(SbtIdeaPlugin)
     .settings(
       libraryDependencies += Dependencies.nailgun,
       packageLibraryMappings += Dependencies.nailgun -> Some("lib/jps/nailgun.jar"),
@@ -140,7 +124,6 @@ lazy val nailgunRunners =
 
 lazy val decompiler =
   newProject("decompiler", file("scala/decompiler"))
-    .settings(commonTestSettings(packageOutputDir): _*)
     .settings(
       libraryDependencies ++= DependencyGroups.decompiler,
       packageMethod := PackagingMethod.Standalone("lib/scalap.jar")
@@ -148,20 +131,17 @@ lazy val decompiler =
 
 lazy val macroAnnotations =
   newProject("macros", file("scala/macros"))
-    .settings(Seq(
+    .settings(
       addCompilerPlugin(Dependencies.macroParadise),
       libraryDependencies ++= Seq(Dependencies.scalaReflect, Dependencies.scalaCompiler),
-      packageMethod := PackagingMethod.Skip()
-    ): _*)
+      packageMethod        := PackagingMethod.Skip()
+    )
 
 // Integration with other IDEA plugins
 
 lazy val androidIntegration =
   newProject("android", file("scala/integration/android"))
     .dependsOn(scalaImpl % "test->test;compile->compile")
-    .enablePlugins(SbtIdeaPlugin)
-    .settings(fullClasspath in Test := deduplicatedClasspath((fullClasspath in Test).value, communityFullClasspath.value))
-    .settings(commonTestSettings(packageOutputDir): _*)
     .settings(
       ideaInternalPlugins := Seq(
         "android",
@@ -174,9 +154,6 @@ lazy val androidIntegration =
 lazy val copyrightIntegration =
   newProject("copyright", file("scala/integration/copyright"))
     .dependsOn(scalaImpl % "test->test;compile->compile")
-    .enablePlugins(SbtIdeaPlugin)
-    .settings(fullClasspath in Test := deduplicatedClasspath((fullClasspath in Test).value, communityFullClasspath.value))
-    .settings(commonTestSettings(packageOutputDir): _*)
     .settings(
       ideaInternalPlugins := Seq("copyright")
     )
@@ -184,22 +161,16 @@ lazy val copyrightIntegration =
 lazy val gradleIntegration =
   newProject("gradle", file("scala/integration/gradle"))
     .dependsOn(scalaImpl % "test->test;compile->compile")
-    .enablePlugins(SbtIdeaPlugin)
-    .settings(fullClasspath in Test := deduplicatedClasspath((fullClasspath in Test).value, communityFullClasspath.value))
-    .settings(commonTestSettings(packageOutputDir): _*)
     .settings(
       ideaInternalPlugins := Seq(
         "gradle",
-        "groovy", // required by Gradle
+        "groovy",     // required by Gradle
         "properties") // required by Gradle
     )
 
 lazy val intellilangIntegration =
   newProject("intellilang", file("scala/integration/intellilang"))
     .dependsOn(scalaImpl % "test->test;compile->compile")
-    .enablePlugins(SbtIdeaPlugin)
-    .settings(fullClasspath in Test := deduplicatedClasspath((fullClasspath in Test).value, communityFullClasspath.value))
-    .settings(commonTestSettings(packageOutputDir): _*)
     .settings(
       ideaInternalPlugins := Seq("IntelliLang")
     )
@@ -207,9 +178,6 @@ lazy val intellilangIntegration =
 lazy val mavenIntegration =
   newProject("maven", file("scala/integration/maven"))
     .dependsOn(scalaImpl % "test->test;compile->compile")
-    .enablePlugins(SbtIdeaPlugin)
-    .settings(fullClasspath in Test := deduplicatedClasspath((fullClasspath in Test).value, communityFullClasspath.value))
-    .settings(commonTestSettings(packageOutputDir): _*)
     .settings(
       ideaInternalPlugins := Seq("maven")
     )
@@ -217,14 +185,20 @@ lazy val mavenIntegration =
 lazy val propertiesIntegration =
   newProject("properties", file("scala/integration/properties"))
     .dependsOn(scalaImpl % "test->test;compile->compile")
-    .enablePlugins(SbtIdeaPlugin)
-    .settings(fullClasspath in Test := deduplicatedClasspath((fullClasspath in Test).value, communityFullClasspath.value))
-    .settings(commonTestSettings(packageOutputDir): _*)
     .settings(
       ideaInternalPlugins := Seq("properties")
     )
 
 // Utility projects
+
+lazy val repackagedZinc =
+  newProject("repackagedZinc", file("target/tools/zinc"))
+    .settings(
+      packageOutputDir := baseDirectory.value / "plugin",
+      packageAssembleLibraries := true,
+      packageMethod := PackagingMethod.Standalone("lib/jps/incremental-compiler.jar"),
+      libraryDependencies += Dependencies.zinc,
+      ideSkipProject := true)
 
 lazy val sbtRuntimeDependencies =
   (project in file("target/tools/sbt-runtime-dependencies"))
@@ -257,8 +231,7 @@ lazy val sbtRuntimeDependencies =
           repoDir,
           (sbtStructureExtractor.name, sbtStructureVersion) :: ("sbt-idea-shell", sbtIdeaShellVersion) :: Nil)
         repoDir -> "repo/"
-      }
-    )
+      })
 
 //lazy val jmhBenchmarks =
 //  newProject("benchmarks", file("scala/benchmarks"))
@@ -288,27 +261,6 @@ addCommandAlias("runFastTestsComIntelliJ", s"testOnly com.intellij.* -- $fastTes
 addCommandAlias("runFastTestsOrgJetbrains", s"testOnly org.jetbrains.* -- $fastTestOptions")
 addCommandAlias("runFastTestsScala", s"testOnly scala.* -- $fastTestOptions")
 
-lazy val cleanUpTestEnvironment = taskKey[Unit]("Clean up IDEA test system and config directories")
-
-cleanUpTestEnvironment in ThisBuild := {
-  IO.delete(testSystemDir.value)
-  IO.delete(testConfigDir.value)
-}
-
-concurrentRestrictions in Global := Seq(
-  Tags.limit(Tags.Test, 1)
-)
-
 communityFullClasspath in ThisBuild :=
   deduplicatedClasspath(fullClasspath.in(scalaCommunity, Test).value, fullClasspath.in(scalaCommunity, Compile).value)
 
-
-lazy val repackagedZinc =
-  newProject("repackagedZinc", file("target/tools/zinc"))
-    .settings(
-      packageOutputDir := baseDirectory.value / "plugin",
-      packageAssembleLibraries := true,
-      packageMethod := PackagingMethod.Standalone("lib/jps/incremental-compiler.jar"),
-      libraryDependencies += Dependencies.zinc,
-      ideSkipProject := true
-    )
