@@ -28,7 +28,14 @@ class SbtProjectSettings extends ExternalProjectSettings {
   var resolveJavadocs: Boolean = false
 
   @BeanProperty
+  @deprecated(message = "use separate import/build settings")
   var useSbtShell: Boolean = false
+
+  @BeanProperty
+  var useSbtShellForImport: Boolean = false
+
+  @BeanProperty
+  var useSbtShellForBuild: Boolean = false
 
   @BeanProperty
   var enableDebugSbtShell: Boolean = true
@@ -46,6 +53,8 @@ class SbtProjectSettings extends ExternalProjectSettings {
     result.resolveSbtClassifiers = resolveSbtClassifiers
     result.sbtVersion = sbtVersion
     result.useSbtShell = useSbtShell
+    result.useSbtShellForImport = useSbtShellForImport
+    result.useSbtShellForBuild = useSbtShellForBuild
     result.enableDebugSbtShell = enableDebugSbtShell
     result
   }
