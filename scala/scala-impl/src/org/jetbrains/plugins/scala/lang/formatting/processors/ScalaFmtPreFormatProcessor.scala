@@ -8,7 +8,7 @@ import com.intellij.lang.ASTNode
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.MessageType
 import com.intellij.openapi.ui.popup.{Balloon, JBPopupFactory}
-import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.util.{Key, TextRange}
 import com.intellij.openapi.vfs.{StandardFileSystems, VirtualFile}
 import com.intellij.openapi.wm.ex.WindowManagerEx
 import com.intellij.psi._
@@ -19,6 +19,7 @@ import com.intellij.ui.awt.RelativePoint
 import com.intellij.util.containers.ContainerUtil
 import org.jetbrains.plugins.hocon.psi.HoconPsiFile
 import org.jetbrains.plugins.scala.ScalaFileType
+import org.jetbrains.plugins.scala.extensions.PsiElementExt
 import org.jetbrains.plugins.scala.lang.formatting.settings.ScalaCodeStyleSettings
 import org.jetbrains.plugins.scala.lang.lexer.ScalaTokenTypes
 import org.jetbrains.plugins.scala.lang.psi.ScalaPsiUtil
@@ -27,6 +28,7 @@ import org.jetbrains.plugins.scala.lang.psi.api.expr.ScBlockStatement
 import org.jetbrains.plugins.scala.lang.psi.api.toplevel.templates.ScTemplateBody
 import org.jetbrains.plugins.scala.lang.psi.api.toplevel.typedef.ScMember
 import org.jetbrains.plugins.scala.lang.psi.impl.{ScalaPsiElementFactory, ScalaPsiManager}
+import org.jetbrains.plugins.scala.project.UserDataHolderExt
 import org.jetbrains.sbt.language.SbtFileImpl
 import org.scalafmt.Formatted.Success
 import org.scalafmt.Scalafmt
@@ -42,7 +44,9 @@ class ScalaFmtPreFormatProcessor extends PreFormatProcessor {
     psiFile match {
       case Some(null) | None => TextRange.EMPTY_RANGE
       case _ if range.isEmpty => TextRange.EMPTY_RANGE
-      case Some(file: ScalaFile) => ScalaFmtPreFormatProcessor.formatIfRequired(file, range)
+      case Some(file: ScalaFile) =>
+        ScalaFmtPreFormatProcessor.formatIfRequired(file, range)
+        TextRange.EMPTY_RANGE
       case _ => range
     }
   }
@@ -91,10 +95,11 @@ object ScalaFmtPreFormatProcessor {
     } else path
   }
 
-  private def formatIfRequired(file: PsiFile, range: TextRange): TextRange = {
-    val cache = ScalaPsiManager.instance(file.getProject).scalafmtFormattedFiles
-    val cached = cache.getOrDefault(file, (new TextRanges, file.getModificationStamp))
-    if (cached._2 == file.getModificationStamp && cached._1.contains(range)) return TextRange.EMPTY_RANGE
+  private def formatIfRequired(file: PsiFile, range: TextRange): Unit = {
+    val cached = file.getOrUpdateUserData(FORMATTED_RANGES_KEY, (new TextRanges, file.getModificationStamp))
+
+    if (cached._2 == file.getModificationStamp && cached._1.contains(range)) return
+
     val delta = formatRange(file, range)
     def moveRanges(textRanges: TextRanges): TextRanges = {
       textRanges.ranges.map{ otherRange =>
@@ -103,9 +108,10 @@ object ScalaFmtPreFormatProcessor {
         else TextRange.EMPTY_RANGE
       }.foldLeft(new TextRanges())((acc, aRange) => acc.union(aRange))
     }
+
     val ranges = if (cached._2 == file.getModificationStamp) moveRanges(cached._1) else new TextRanges
-    cache.put(file, (ranges.union(range.grown(delta)), file.getModificationStamp))
-    TextRange.EMPTY_RANGE
+
+    file.putUserData(FORMATTED_RANGES_KEY, (ranges.union(range.grown(delta)), file.getModificationStamp))
   }
 
   private def formatRange(file: PsiFile, range: TextRange): Int = {
@@ -150,10 +156,16 @@ object ScalaFmtPreFormatProcessor {
     wrapPrefix + elementText + wrapSuffix
 
   private def unwrap(wrapFile: PsiFile): Seq[PsiElement] = {
-    //get rid of braces and whitespaces near them
-    val res = PsiTreeUtil.getChildrenOfType(PsiTreeUtil.findChildOfType(wrapFile, classOf[ScTemplateBody]), classOf[PsiElement])
-    res.drop(2).dropRight(2)
+    val templateBody = PsiTreeUtil.findChildOfType(wrapFile, classOf[ScTemplateBody])
+    if (templateBody == null) Seq.empty
+    else {
+      //get rid of braces and whitespaces near them
+      templateBody.children.toList
+        .drop(2).dropRight(2)
+    }
   }
+
+  private def isWhitespace(element: PsiElement) = element.isInstanceOf[PsiWhiteSpace]
 
   private def isProperUpperLevelPsi(element: PsiElement): Boolean = element match {
     case _: ScBlockStatement | _: ScMember | _: PsiWhiteSpace => true
@@ -169,16 +181,20 @@ object ScalaFmtPreFormatProcessor {
       case Some(_: PsiWhiteSpace) => Seq.empty
       case Some(parent: LeafPsiElement) if isProperUpperLevelPsi(parent) => Seq(parent)
       case Some(parent) =>
-        val rawChildren = PsiTreeUtil.getChildrenOfType(parent, classOf[PsiElement])
+        val rawChildren = parent.children.toArray
         var children = rawChildren.filter(_.getTextRange.intersects(range))
+
         //drop unnecessary whitespaces
-        while (children.head.isInstanceOf[PsiWhiteSpace]) children = children.tail
-        while (children.last.isInstanceOf[PsiWhiteSpace]) children = children.dropRight(1)
-        if (children.forall(isProperUpperLevelPsi)) {
+        while (children.headOption.exists(isWhitespace)) children = children.tail
+        while (children.lastOption.exists(isWhitespace)) children = children.dropRight(1)
+
+        if (children.isEmpty) Seq.empty
+        else if (children.forall(isProperUpperLevelPsi)) {
           //for uniformity use the upper-most of embedded elements with same contents
-          if (children.head == rawChildren.head && children.last == rawChildren.last && isProperUpperLevelPsi(parent)) Seq(parent)
+          if (children.length == rawChildren.length && isProperUpperLevelPsi(parent)) Seq(parent)
           else children
-        } else if (isProperUpperLevelPsi(parent)) Seq(parent)
+        }
+        else if (isProperUpperLevelPsi(parent)) Seq(parent)
         else ScalaPsiUtil.getParentWithProperty(parent, strict = false, isProperUpperLevelPsi) match {
           case Some(properParent) if properParent != file => Seq(properParent)
           case _ => Seq.empty
@@ -233,11 +249,12 @@ object ScalaFmtPreFormatProcessor {
     def traverseSettingWs(formatted: PsiElement, original: PsiElement): Unit = {
       var formattedIndex = 0
       var originalIndex = 0
-      if (formatted.isInstanceOf[PsiWhiteSpace] && original.isInstanceOf[PsiWhiteSpace]) original.replace(widenWs(formatted))
-      val formattedChildren = PsiTreeUtil.getChildrenOfType(formatted, classOf[PsiElement])
-      val originalChildren = PsiTreeUtil.getChildrenOfType(original, classOf[PsiElement])
-      if (formattedChildren == null || originalChildren == null) return
-      while (formattedIndex < formattedChildren.size && originalIndex < originalChildren.size) {
+      if (isWhitespace(formatted) && isWhitespace(original)) original.replace(widenWs(formatted))
+
+      val formattedChildren = formatted.children.toArray
+      val originalChildren = original.children.toArray
+
+      while (formattedIndex < formattedChildren.length && originalIndex < originalChildren.length) {
         val originalElement = originalChildren(originalIndex)
         val formattedElement = formattedChildren(formattedIndex)
         val isInRange = originalElement.getTextRange.intersects(range.grown(delta))
@@ -321,4 +338,6 @@ object ScalaFmtPreFormatProcessor {
       new TextRanges(newRanges)
     }
   }
+
+  private val FORMATTED_RANGES_KEY: Key[(TextRanges, Long)] = Key.create("scala.fmt.formatted.ranges")
 }
