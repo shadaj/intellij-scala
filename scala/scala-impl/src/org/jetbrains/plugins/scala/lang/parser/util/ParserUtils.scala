@@ -16,12 +16,12 @@ import com.intellij.testFramework.LightVirtualFileBase
 import org.jetbrains.plugins.scala.lang.lexer.ScalaTokenTypes
 import org.jetbrains.plugins.scala.lang.parser.parsing.builder.ScalaPsiBuilder
 import org.jetbrains.plugins.scala.lang.psi.stubs.elements.ScStubElementType
+import org.jetbrains.plugins.scala.project.ProjectPsiElementExt
 import org.jetbrains.plugins.scala.settings.ScalaProjectSettings
 import org.jetbrains.plugins.scala.util.DebugPrint
 
 import scala.annotation.tailrec
 import scala.collection.immutable.IndexedSeq
-import scala.meta.intellij.IdeaUtil
 
 
 object ParserUtils extends ParserUtilsBase {
@@ -307,9 +307,7 @@ object ParserUtils extends ParserUtilsBase {
   }
   
   def hasMeta(builder: PsiBuilder): Boolean = !ScStubElementType.isStubBuilding &&
-    !DumbService.isDumb(builder.getProject) && getPsiFile(builder).exists {
-    file => IdeaUtil.inModuleWithParadisePlugin(file)
-  }
+    !DumbService.isDumb(builder.getProject) && getPsiFile(builder).exists(_.isMetaParadiseEnabled)
   
   def getPsiFile(builder: PsiBuilder): Option[PsiFile] = {
     val delegate = builder match {

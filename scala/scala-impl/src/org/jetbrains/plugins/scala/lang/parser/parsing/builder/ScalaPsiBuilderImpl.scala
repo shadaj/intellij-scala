@@ -6,11 +6,10 @@ import com.intellij.openapi.project.DumbService
 import org.jetbrains.plugins.scala.lang.parser.util.ParserUtils
 import org.jetbrains.plugins.scala.lang.parser.util.ParserUtils.getPsiFile
 import org.jetbrains.plugins.scala.lang.psi.stubs.elements.ScStubElementType
-import org.jetbrains.plugins.scala.project.Version
+import org.jetbrains.plugins.scala.project.{ProjectPsiElementExt, Version}
 import org.jetbrains.plugins.scala.util.ScalaUtil
 
 import scala.collection.mutable
-import scala.meta.intellij.IdeaUtil
 
 /**
   * @author Alexander Podkhalyuzin
@@ -23,9 +22,7 @@ class ScalaPsiBuilderImpl(builder: PsiBuilder)
   private lazy val scalaVersion: Option[Version] = ParserUtils.getPsiFile(this).flatMap(ScalaUtil.getScalaVersion).map(Version(_))
   private lazy val hasMeta: Boolean = 
     !ScStubElementType.isStubBuilding &&
-    !DumbService.isDumb(getProject) && getPsiFile(this).exists {
-      file => IdeaUtil.inModuleWithParadisePlugin(file)
-    }
+    !DumbService.isDumb(getProject) && getPsiFile(this).exists(_.isMetaParadiseEnabled)
   
   def newlineBeforeCurrentToken: Boolean = {
     countNewlineBeforeCurrentToken() > 0

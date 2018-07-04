@@ -1,6 +1,7 @@
 package org.jetbrains.plugins.scala
 
 import java.io.File
+import java.util.jar.Attributes
 
 import com.intellij.lang.Language
 import com.intellij.openapi.module.{ModifiableModuleModel, Module, ModuleManager, ModuleUtilCore}
@@ -9,6 +10,7 @@ import com.intellij.openapi.roots._
 import com.intellij.openapi.roots.impl.libraries.{LibraryEx, ProjectLibraryTable}
 import com.intellij.openapi.roots.libraries.Library
 import com.intellij.openapi.roots.ui.configuration.libraryEditor.ExistingLibraryEditor
+import com.intellij.openapi.util.io.JarUtil
 import com.intellij.openapi.util.{Key, UserDataHolder, UserDataHolderEx}
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.psi.{PsiElement, PsiFile}
@@ -136,6 +138,21 @@ package object project {
     def isPartialUnificationEnabled: Boolean =
       scalaLanguageLevel.exists(_ >= Scala_2_13) ||
         compilerConfiguration.hasSettingForHighlighting(module, _.partialUnification)
+
+    @CachedInUserData(module, ScalaCompilerConfiguration.modTracker(module.getProject))
+    def isMetaParadiseEnabled: Boolean = compilerConfiguration
+      .hasSettingForHighlighting(module, _.plugins.exists(isMetaParadiseJar))
+
+    private def isMetaParadiseJar(path: String): Boolean = {
+      val file = new File(path)
+      if (!JarUtil.containsEntry(file, "scalac-plugin.xml")) return false
+
+      val vendor = new Attributes.Name("Specification-Vendor")
+      val title = new Attributes.Name("Specification-Title")
+
+      JarUtil.getJarAttribute(file, vendor) == "org.scalameta" &&
+        JarUtil.getJarAttribute(file, title) == "paradise"
+    }
 
     private def compilerConfiguration =
       ScalaCompilerConfiguration.instanceIn(module.getProject)
@@ -273,6 +290,7 @@ package object project {
     def isSAMEnabled              : Boolean = inThisModuleOrProject(_.isSAMEnabled)
     def literalTypesEnabled       : Boolean = inThisModuleOrProject(_.literalTypesEnabled)
     def partialUnificationEnabled : Boolean = inThisModuleOrProject(_.isPartialUnificationEnabled)
+    def isMetaParadiseEnabled     : Boolean = inThisModuleOrProject(_.isMetaParadiseEnabled)
 
     private def inThisModuleOrProject(predicate: Module => Boolean): Boolean = module match {
       case Some(m) => predicate(m)
